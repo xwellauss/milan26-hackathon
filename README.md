@@ -39,7 +39,7 @@ A comprehensive, responsive campus management portal and academic scheduling sys
 
 ```bash
 # Install all dependencies
-npm install
+npm install -legacy-peer-deps
 
 # Run development server (Express + Vite)
 npm run dev
