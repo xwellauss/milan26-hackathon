@@ -1,0 +1,8 @@
+{
+  "name": "Remix IRIS V4 - AirTable Integration",
+  "description": "Institute announcements, discussion forum, and weekly academic schedules with recurring base events, date-specific exceptions, and schedule validity bounds.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
