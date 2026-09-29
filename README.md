@@ -31,7 +31,7 @@ A comprehensive, responsive campus management portal and academic scheduling sys
   - Express server proxy with rate-limit handling and real-time status diagnostics.
 - **Role-Based Access Control (RBAC)**:
   - Normal Student, Class Representative (CR), and Hostel Representative (HR).
-  - Automated identity inference from standard IITH email format (`<branch><year>btech<roll>@iith.ac.in`).
+  - Automated identity inference from CRs, Hrs database.
 
 ---
 
