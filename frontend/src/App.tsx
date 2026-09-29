@@ -678,7 +678,7 @@ const LoginScreen = () => {
           {activeTab === 'login' ? 'IRIS Portal Login' : 'Create IRIS Account'}
         </h2>
         <p className="text-center text-slate-500 dark:text-slate-400 mb-6 text-xs">
-          IIT Hyderabad Resource Information & Schedule Management System
+          IITH Resources & Information System
         </p>
 
         {activeTab === 'login' ? (
