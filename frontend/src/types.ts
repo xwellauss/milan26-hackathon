@@ -1,19 +1,38 @@
 export type Role = 'Normal Student' | 'CR' | 'HR';
-export type Branch = 'CS' | 'EE' | 'MnC' | 'AI' | 'ME' | 'CE' | 'BT' | '-';
-export type HostelName = 'Vivekananda' | 'S.N. Bose' | 'Kalpana Chawla';
+export type Branch = string; // e.g. 'CS26' | 'CS25' | 'EE26' | 'EE25' | 'MnC26' | 'MC26' | 'AI26' | 'ME26' | 'CE26' | 'BT26' | '-' | 'All';
+export type HostelName = 'Vivekananda' | 'S.N. Bose' | 'Kalpana Chawla' | string;
 export type Tag = 'URGENT' | 'IMPORTANT' | 'INFO' | 'EXAM' | 'LECTURE';
 export type ThreadTag = 'Academic' | 'Announcement Discussion' | 'TimePass';
 
+export interface HRBasicInfo {
+  id: string;
+  name: string;
+  email?: string;
+  rollNo?: string;
+  branch?: string;
+  hostel?: string;
+}
+
 export interface HostelInfo {
   id: string;
-  name: HostelName;
-  code: string;
+  hostel_name: string;
+  hostel_code: string;
   warden_name: string;
   warden_email: string;
-  hr_id: string;
-  hr_name?: string;
-  hr_email?: string;
-  hr_rollNo?: string;
+  warden_number: string;
+  hr_ids: string; // comma-delimited user IDs e.g. "u4, u5"
+  name?: string; // backwards compatibility alias for hostel_name
+  code?: string; // backwards compatibility alias for hostel_code
+  hrs?: HRBasicInfo[];
+}
+
+export interface BranchInfo {
+  id: string;
+  branch_code: string; // e.g. "CS26", "CS25", "EE26"
+  branch_name: string; // e.g. "Computer Science & Engineering (2026 Batch)"
+  fa_name: string; // Faculty Advisor Name e.g. "Dr. Maunendra Desarkar"
+  fa_email: string;
+  fa_number: string;
 }
 
 export interface User {
@@ -44,7 +63,7 @@ export interface HRTableEntry {
 export interface Announcement {
   id: string;
   author_id: string;
-  author_name: string;
+  author_name?: string; // dynamically resolved via author_id + user directory
   type: 'academic' | 'hostel';
   target: string;
   content: string;
@@ -56,7 +75,7 @@ export interface Reply {
   id: string;
   target_id: string;
   author_id: string;
-  author_name: string;
+  author_name?: string; // dynamically resolved via author_id + user directory
   content: string;
   created_at: number;
   is_deleted: boolean;
@@ -65,7 +84,7 @@ export interface Reply {
 export interface Thread {
   id: string;
   author_id: string;
-  author_name: string;
+  author_name?: string; // dynamically resolved via author_id + user directory
   title: string;
   created_at: number;
   tags: ThreadTag[];
@@ -113,11 +132,10 @@ export interface ExamItem {
   date: string; // YYYY-MM-DD
   time: string | null; // e.g. "09:30 - 12:30", "14:30 - 17:30", or null
   course_code: string; // e.g. "CS3020"
-  course_name?: string; // e.g. "Operating Systems"
+  course_name?: string; // derived dynamically using course_code & INITIAL_COURSES table
   exam_name: string; // e.g. "Mid-Semester Exam", "End-Semester Exam", "Quiz 1", "Practical Lab Exam"
   venue: string | null; // e.g. "Academic Block A - LH-101", "Lab 2", or null
-  target_branch: Branch | 'All';
-  slot?: string | null; // e.g. "Slot A"
+  target_branch?: Branch | 'All'; // derived dynamically using course_code & INITIAL_COURSES table
   notes?: string | null;
 }
 
@@ -153,8 +171,8 @@ export interface Instructor {
 }
 
 export interface Course {
-  id: string;
-  code: string; // e.g. "CS3020"
+  id: string; // code is primary key
+  code: string; // Primary key e.g. "CS3020"
   name: string; // e.g. "Operating Systems"
   credits: number; // e.g. 3
   semester: string; // e.g. "Autumn 2026 (Sem 5)"
@@ -173,8 +191,9 @@ export interface Course {
 export interface Enrollment {
   id: string;
   user_id: string; // user id or email
-  course_id: string;
-  semester: string;
+  course_code: string; // replaced course_id with course_code
+  course_id?: string; // backwards compatibility alias
+  semester?: string; // retrieved from INITIAL_COURSES using course_code
   status: 'Active' | 'Completed' | 'Dropped';
   enrolled_date: string;
 }

@@ -36,17 +36,17 @@ export const Curriculum = () => {
       en => en.user_id === user.id && en.status === 'Active'
     );
 
-    const enrolledCourseIds = new Set(userEnrollments.map(en => en.course_id));
+    const enrolledCourseCodes = new Set(userEnrollments.map(en => en.course_code || en.course_id));
 
-    if (enrolledCourseIds.size === 0) {
+    if (enrolledCourseCodes.size === 0) {
       courses.forEach(c => {
-        if (c.branch === user.branch || c.branch === 'All') {
-          enrolledCourseIds.add(c.id);
+        if (c.branch === user.branch || c.branch === 'All' || user.branch?.startsWith(c.branch)) {
+          enrolledCourseCodes.add(c.code);
         }
       });
     }
 
-    let userCoursesList = courses.filter(c => enrolledCourseIds.has(c.id));
+    let userCoursesList = courses.filter(c => enrolledCourseCodes.has(c.code));
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -176,7 +176,7 @@ export const Curriculum = () => {
           <div className="divide-y divide-slate-100 dark:divide-slate-800/80 rounded-xl border border-rose-100/80 dark:border-slate-800 overflow-hidden bg-white dark:bg-slate-900">
             {activeUserCourses.map((course: Course) => (
               <div
-                key={course.id}
+                key={course.code || course.id}
                 onClick={() => setSelectedCourse(course)}
                 className="group p-3.5 sm:px-4 sm:py-3 hover:bg-rose-50/35 dark:hover:bg-slate-800/60 active:scale-[0.99] transition-all duration-150 cursor-pointer flex items-center justify-between gap-4"
               >

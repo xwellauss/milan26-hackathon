@@ -1,9 +1,10 @@
 import {
   User, Announcement, Reply, Thread, ScheduleMaster,
   BaseEvent, ExceptionEvent, ExamItem, ResourceFolder, ResourceItem,
-  Course, Enrollment, Tag, ThreadTag, Branch, Role, Instructor
+  Course, Enrollment, Tag, ThreadTag, Branch, Role, Instructor,
+  HostelInfo, BranchInfo, HRBasicInfo
 } from '../types';
-import { inferUserDetailsFromEmail } from '../utils/institute';
+import { inferUserDetailsFromEmail, HOSTEL_TABLE, BRANCH_TABLE } from '../utils/institute';
 
 export interface AirtableStatus {
   connected: boolean;
@@ -36,7 +37,9 @@ const TABLE_NAMES = [
   'INITIAL_FOLDERS',
   'INITIAL_RESOURCES',
   'INITIAL_COURSES',
-  'INITIAL_ENROLLMENTS'
+  'INITIAL_ENROLLMENTS',
+  'HOSTEL_INFO',
+  'BRANCH_INFO'
 ];
 
 // Global record ID mapping: entityId -> airtableRecId
@@ -256,9 +259,9 @@ export class AirtableService {
         return {
           id,
           author_id: String(f.author_id || ''),
-          author_name: String(f.author_name || 'Admin'),
+          author_name: f.author_name ? String(f.author_name) : undefined,
           type: f.type === 'hostel' ? 'hostel' : 'academic',
-          target: String(f.target || 'CS'),
+          target: String(f.target || 'CS26'),
           content: String(f.content || ''),
           date_time: parseTimestamp(f.date_time),
           tags: parseTags(f.tags)
@@ -275,7 +278,7 @@ export class AirtableService {
         return {
           id,
           author_id: String(f.author_id || ''),
-          author_name: String(f.author_name || 'Student'),
+          author_name: f.author_name ? String(f.author_name) : undefined,
           title: String(f.title || ''),
           created_at: parseTimestamp(f.created_at),
           tags: parseThreadTags(f.tags),
@@ -296,7 +299,7 @@ export class AirtableService {
           id,
           target_id: String(f.target_id || ''),
           author_id: String(f.author_id || ''),
-          author_name: String(f.author_name || 'Student'),
+          author_name: f.author_name ? String(f.author_name) : undefined,
           content: String(f.content || ''),
           created_at: parseTimestamp(f.created_at),
           is_deleted: f.is_deleted === true || f.is_deleted === 'true'
@@ -314,7 +317,7 @@ export class AirtableService {
           id,
           title: String(f.title || ''),
           type: (f.type as any) || 'Lecture Schedule',
-          target_branch: (f.target_branch as Branch) || 'CS',
+          target_branch: (f.target_branch as Branch) || 'CS26',
           valid_from: String(f.valid_from || '2026-09-01'),
           valid_until: String(f.valid_until || '2026-12-31')
         } as ScheduleMaster;
@@ -374,8 +377,7 @@ export class AirtableService {
           course_name: f.course_name ? String(f.course_name) : undefined,
           exam_name: String(f.exam_name || 'Examination'),
           venue: f.venue && f.venue !== 'null' ? String(f.venue) : null,
-          target_branch: (f.target_branch as any) || 'CS',
-          slot: f.slot && f.slot !== 'null' ? String(f.slot) : null,
+          target_branch: (f.target_branch as any) || undefined,
           notes: f.notes && f.notes !== 'null' ? String(f.notes) : null
         } as ExamItem;
       });
@@ -391,7 +393,7 @@ export class AirtableService {
           id,
           name: String(f.name || 'Folder'),
           parent_id: f.parent_id && f.parent_id !== 'null' ? String(f.parent_id) : null,
-          branch: (f.branch as Branch) || 'CS',
+          branch: (f.branch as Branch) || 'CS26',
           created_at: parseTimestamp(f.created_at),
           created_by: String(f.created_by || 'Admin')
         } as ResourceFolder;
@@ -412,7 +414,7 @@ export class AirtableService {
           id,
           name: String(f.name || 'Resource'),
           folder_id: f.folder_id && f.folder_id !== 'null' ? String(f.folder_id) : null,
-          branch: (f.branch as Branch) || 'CS',
+          branch: (f.branch as Branch) || 'CS26',
           size: String(f.size || '10 KB'),
           type: (f.type as any) || 'md',
           uploaded_at: parseTimestamp(f.uploaded_at),
@@ -424,16 +426,16 @@ export class AirtableService {
       });
     }
 
-    // 11. INITIAL_COURSES
+    // 11. INITIAL_COURSES (code is primary key)
     if (tables.INITIAL_COURSES?.success && tables.INITIAL_COURSES.records?.length > 0) {
       parsedData.courses = tables.INITIAL_COURSES.records.map((r: any) => {
         const f = r.fields || {};
-        const id = String(f.id || r.id);
-        recordIdMap.set(id, r.id);
-        const branch = (f.branch as any) || 'CS';
+        const code = String(f.code || f.id || r.id);
+        recordIdMap.set(code, r.id);
+        const branch = (f.branch as any) || 'CS26';
         return {
-          id,
-          code: String(f.code || ''),
+          id: code,
+          code,
           name: String(f.name || ''),
           credits: Number(f.credits || 3),
           semester: String(f.semester || 'Autumn 2026 (Sem 5)'),
@@ -444,27 +446,67 @@ export class AirtableService {
           slot: String(f.slot || ''),
           venue: String(f.venue || ''),
           moodle_link: f.moodle_link ? String(f.moodle_link) : undefined,
-          instructors: parseInstructors(f.instructors, branch === 'All' ? 'CS' : branch),
+          instructors: parseInstructors(f.instructors, branch === 'All' ? 'CS26' : branch),
           teaching_assistants: parseTeachingAssistants(f.teaching_assistants),
           description: f.description ? String(f.description) : undefined
         } as Course;
       });
     }
 
-    // 12. INITIAL_ENROLLMENTS
+    // 12. INITIAL_ENROLLMENTS (uses course_code, semester retrieved from INITIAL_COURSES)
     if (tables.INITIAL_ENROLLMENTS?.success && tables.INITIAL_ENROLLMENTS.records?.length > 0) {
       parsedData.enrollments = tables.INITIAL_ENROLLMENTS.records.map((r: any) => {
         const f = r.fields || {};
         const id = String(f.id || r.id);
         recordIdMap.set(id, r.id);
+        const courseCode = String(f.course_code || f.course_id || '');
         return {
           id,
           user_id: String(f.user_id || '').split(' ')[0].trim(),
-          course_id: String(f.course_id || ''),
-          semester: String(f.semester || 'Autumn 2026'),
+          course_code: courseCode,
+          course_id: courseCode,
           status: (f.status as any) || 'Active',
           enrolled_date: String(f.enrolled_date || '2026-08-01')
         } as Enrollment;
+      });
+    }
+
+    // 13. HOSTEL_INFO
+    if (tables.HOSTEL_INFO?.success && tables.HOSTEL_INFO.records?.length > 0) {
+      parsedData.hostels = tables.HOSTEL_INFO.records.map((r: any) => {
+        const f = r.fields || {};
+        const id = String(f.id || r.id);
+        recordIdMap.set(id, r.id);
+        const hostelName = String(f.hostel_name || f.name || 'Vivekananda');
+        const hostelCode = String(f.hostel_code || f.code || 'VK');
+        return {
+          id,
+          hostel_name: hostelName,
+          hostel_code: hostelCode,
+          name: hostelName,
+          code: hostelCode,
+          warden_name: String(f.warden_name || 'Hostel Warden'),
+          warden_email: String(f.warden_email || ''),
+          warden_number: String(f.warden_number || ''),
+          hr_ids: String(f.hr_ids || '')
+        } as HostelInfo;
+      });
+    }
+
+    // 14. BRANCH_INFO
+    if (tables.BRANCH_INFO?.success && tables.BRANCH_INFO.records?.length > 0) {
+      parsedData.branches = tables.BRANCH_INFO.records.map((r: any) => {
+        const f = r.fields || {};
+        const id = String(f.id || r.id);
+        recordIdMap.set(id, r.id);
+        return {
+          id,
+          branch_code: String(f.branch_code || ''),
+          branch_name: String(f.branch_name || ''),
+          fa_name: String(f.fa_name || 'Faculty Advisor'),
+          fa_email: String(f.fa_email || ''),
+          fa_number: String(f.fa_number || '')
+        } as BranchInfo;
       });
     }
 
@@ -521,7 +563,7 @@ export class AirtableService {
     };
   }
 
-  // Load all 12 tables from Airtable
+  // Load all tables from Airtable
   async fetchAllData(): Promise<{
     success: boolean;
     error?: any;
@@ -538,6 +580,8 @@ export class AirtableService {
       resources?: ResourceItem[];
       courses?: Course[];
       enrollments?: Enrollment[];
+      hostels?: HostelInfo[];
+      branches?: BranchInfo[];
     };
   }> {
     return this.fetchTables(TABLE_NAMES);
@@ -560,6 +604,8 @@ export class AirtableService {
       resources?: ResourceItem[];
       courses?: Course[];
       enrollments?: Enrollment[];
+      hostels?: HostelInfo[];
+      branches?: BranchInfo[];
     };
   }> {
     if (!tableNames || tableNames.length === 0) {
@@ -819,12 +865,24 @@ export class AirtableService {
     }
   }
 
-  // Announcements
+  async fetchUsersDirectory(): Promise<Array<{ id: string; name: string; role: Role; branch: Branch; hostel: string; rollNo?: string; email?: string }>> {
+    try {
+      const res = await fetch('/api/auth/users-directory');
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.users)) {
+        return data.users;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  // Announcements (author_name is resolved via author_id + MOCK_USERS, not written to Airtable)
   async createAnnouncement(ann: Announcement): Promise<void> {
     const fields = {
       id: ann.id,
       author_id: ann.author_id,
-      author_name: ann.author_name,
       type: ann.type,
       target: ann.target,
       content: ann.content,
@@ -846,12 +904,11 @@ export class AirtableService {
     await this.deleteRecord('INITIAL_ANNOUNCEMENTS', id);
   }
 
-  // Threads
+  // Threads (author_name is resolved via author_id + MOCK_USERS, not written to Airtable)
   async createThread(t: Thread): Promise<void> {
     const fields = {
       id: t.id,
       author_id: t.author_id,
-      author_name: t.author_name,
       title: t.title,
       created_at: new Date(t.created_at).toISOString(),
       tags: t.tags[0] || 'Academic',
@@ -864,13 +921,12 @@ export class AirtableService {
     await this.deleteRecord('INITIAL_THREADS', id);
   }
 
-  // Replies
+  // Replies (author_name is resolved via author_id + MOCK_USERS, not written to Airtable)
   async createReply(r: Reply): Promise<void> {
     const fields = {
       id: r.id,
       target_id: r.target_id,
       author_id: r.author_id,
-      author_name: r.author_name,
       content: r.content,
       created_at: new Date(r.created_at).toISOString(),
       is_deleted: r.is_deleted ? 'true' : 'false'
@@ -949,25 +1005,29 @@ export class AirtableService {
     await this.deleteRecord('INITIAL_EXCEPTIONS', id);
   }
 
-  // Exams
+  // Exams (course_name & target_branch fetched from INITIAL_COURSES; slot dropped)
   async createExam(exam: ExamItem): Promise<void> {
     const fields = {
       id: exam.id,
       date: exam.date,
       time: exam.time || 'null',
       course_code: exam.course_code,
-      course_name: exam.course_name || '',
       exam_name: exam.exam_name,
       venue: exam.venue || 'null',
-      target_branch: exam.target_branch,
-      slot: exam.slot || 'null',
       notes: exam.notes || 'null'
     };
     await this.createRecord('INITIAL_EXAMS', fields);
   }
 
   async updateExam(id: string, exam: Partial<ExamItem>): Promise<void> {
-    await this.updateRecord('INITIAL_EXAMS', id, exam);
+    const fields: Record<string, any> = {};
+    if (exam.date !== undefined) fields.date = exam.date;
+    if (exam.time !== undefined) fields.time = exam.time || 'null';
+    if (exam.course_code !== undefined) fields.course_code = exam.course_code;
+    if (exam.exam_name !== undefined) fields.exam_name = exam.exam_name;
+    if (exam.venue !== undefined) fields.venue = exam.venue || 'null';
+    if (exam.notes !== undefined) fields.notes = exam.notes || 'null';
+    await this.updateRecord('INITIAL_EXAMS', id, fields);
   }
 
   async deleteExam(id: string): Promise<void> {
@@ -1127,13 +1187,12 @@ export class AirtableService {
     await this.deleteRecord('INITIAL_RESOURCES', id);
   }
 
-  // Enrollments
+  // Enrollments (course_code used, semester retrieved from INITIAL_COURSES)
   async createEnrollment(en: Enrollment): Promise<void> {
     const fields = {
       id: en.id,
       user_id: en.user_id,
-      course_id: en.course_id,
-      semester: en.semester,
+      course_code: en.course_code || en.course_id,
       status: en.status,
       enrolled_date: en.enrolled_date
     };

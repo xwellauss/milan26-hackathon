@@ -418,7 +418,7 @@ export const Forum = () => {
                               : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
                           }`}
                         >
-                          {msg.author_name.charAt(0)}
+                          {(msg.author_name || 'S').charAt(0)}
                         </div>
 
                         <div className={`flex flex-col min-w-0 ${isOwnMessage ? 'items-end' : 'items-start'}`}>

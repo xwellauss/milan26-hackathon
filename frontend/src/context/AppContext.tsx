@@ -2,13 +2,14 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { 
   User, Announcement, Reply, Thread, ScheduleMaster, 
   BaseEvent, ExceptionEvent, Tag, ExamItem, ResourceFolder, ResourceItem,
-  Course, Enrollment, HostelInfo, HostelName
+  Course, Enrollment, HostelInfo, HostelName, BranchInfo, HRBasicInfo, Branch, Role
 } from '../types';
 import { 
   HOSTEL_TABLE,
+  BRANCH_TABLE,
   inferUserDetailsFromEmail
 } from '../utils/institute';
-import { registerUserRole, registerRepsForRoleLookup } from '../components/UI';
+import { registerUserRole, registerRepsForRoleLookup, registerUsersForRoleLookup } from '../components/UI';
 import { airtableService, AirtableStatus } from '../services/airtableService';
 
 interface AuthContextType {
@@ -97,6 +98,11 @@ interface DataContextType {
   enrollments: Enrollment[];
   setEnrollments: React.Dispatch<React.SetStateAction<Enrollment[]>>;
   hostels: HostelInfo[];
+  branches: BranchInfo[];
+
+  // Author & HR Lookup Resolvers
+  resolveAuthorName: (authorId: string, fallback?: string) => string;
+  resolveHRs: (hrIds?: string) => HRBasicInfo[];
 
   // Airtable Sync Status & Controls
   airtableStatus: AirtableStatus;
@@ -158,15 +164,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentPath, setCurrentPath] = useState('/dashboard');
   const [scheduleSubView, setScheduleSubView] = useState<'list' | 'calendar' | 'today_summary' | 'exam_schedule'>('list');
 
-  // Load public representative directory for instant role badging (CS CR, HR, etc.)
+  // Directory of public user profiles for resolving author_id -> author_name and HR details safely
+  const [userDirectory, setUserDirectory] = useState<Array<{
+    id: string;
+    name: string;
+    role: Role;
+    branch: Branch;
+    hostel: string;
+    rollNo?: string;
+    email?: string;
+  }>>([]);
+
+  const refreshUserDirectory = useCallback(async () => {
+    try {
+      const users = await airtableService.fetchUsersDirectory();
+      if (users.length > 0) {
+        setUserDirectory(users);
+        registerUsersForRoleLookup(users);
+      }
+    } catch {}
+  }, []);
+
+  // Load public representative and user directory for instant role badging and author name resolution
   useEffect(() => {
     if (user) {
       registerUserRole(user);
     }
+    refreshUserDirectory();
     airtableService.fetchReps().then(reps => {
       registerRepsForRoleLookup(reps);
     }).catch(() => {});
-  }, [user]);
+  }, [user, refreshUserDirectory]);
 
   const handleNavigate = useCallback((p: string, subView?: 'list' | 'calendar' | 'today_summary' | 'exam_schedule') => {
     setCurrentPath(p);
@@ -189,7 +217,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [resources, setResources] = useState<ResourceItem[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
-  const [hostels] = useState<HostelInfo[]>(HOSTEL_TABLE);
+  const [hostels, setHostels] = useState<HostelInfo[]>(HOSTEL_TABLE);
+  const [branches, setBranches] = useState<BranchInfo[]>(BRANCH_TABLE);
+
+  // Author & HR Lookup Resolvers
+  const resolveAuthorName = useCallback((authorId: string, fallback?: string): string => {
+    if (!authorId) return fallback || 'Student';
+    if (user && (user.id === authorId || user.email.toLowerCase() === authorId.toLowerCase())) {
+      return user.name;
+    }
+    const found = userDirectory.find(
+      u => u.id === authorId || u.email?.toLowerCase() === authorId.toLowerCase()
+    );
+    if (found && found.name) {
+      return found.name;
+    }
+    // Check in HOSTEL_TABLE seed HRs
+    for (const h of HOSTEL_TABLE) {
+      const hrMatch = h.hrs?.find(hr => hr.id === authorId || hr.email?.toLowerCase() === authorId.toLowerCase());
+      if (hrMatch) return hrMatch.name;
+    }
+    return fallback || 'Student';
+  }, [user, userDirectory]);
+
+  const resolveHRs = useCallback((hrIds?: string): HRBasicInfo[] => {
+    if (!hrIds) return [];
+    const ids = hrIds.split(',').map(s => s.trim()).filter(Boolean);
+    return ids.map(id => {
+      if (user && (user.id === id || user.email.toLowerCase() === id.toLowerCase())) {
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          rollNo: user.rollNo,
+          branch: user.branch,
+          hostel: user.hostel
+        };
+      }
+      const foundInDir = userDirectory.find(
+        u => u.id === id || u.email?.toLowerCase() === id.toLowerCase()
+      );
+      if (foundInDir) {
+        return {
+          id: foundInDir.id,
+          name: foundInDir.name,
+          email: foundInDir.email,
+          rollNo: foundInDir.rollNo,
+          branch: foundInDir.branch,
+          hostel: foundInDir.hostel
+        };
+      }
+      // Check in HOSTEL_TABLE
+      for (const h of HOSTEL_TABLE) {
+        const hrMatch = h.hrs?.find(hr => hr.id === id || hr.email?.toLowerCase() === id.toLowerCase());
+        if (hrMatch) return hrMatch;
+      }
+      return {
+        id,
+        name: `Hostel Representative (${id})`
+      };
+    });
+  }, [user, userDirectory]);
 
   // Airtable Sync State
   const [airtableStatus, setAirtableStatus] = useState<AirtableStatus>({
@@ -210,13 +298,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'INITIAL_EXAMS',
       'INITIAL_ANNOUNCEMENTS',
       'INITIAL_COURSES',
-      'INITIAL_ENROLLMENTS'
+      'INITIAL_ENROLLMENTS',
+      'HOSTEL_INFO',
+      'BRANCH_INFO'
     ],
     '/schedules': [
       'INITIAL_SCHEDULES',
       'INITIAL_BASE_EVENTS',
       'INITIAL_EXCEPTIONS',
-      'INITIAL_EXAMS'
+      'INITIAL_EXAMS',
+      'INITIAL_COURSES'
     ],
     '/announcements': [
       'INITIAL_ANNOUNCEMENTS'
@@ -232,7 +323,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'INITIAL_COURSES',
       'INITIAL_ENROLLMENTS'
     ],
-    '/profile': []
+    '/profile': [
+      'HOSTEL_INFO',
+      'BRANCH_INFO'
+    ]
   };
 
   // Evict data from temporary memory when navigating away from a tab
@@ -292,11 +386,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (res.success && res.data) {
         const d = res.data;
 
+        // Build a temporary course lookup map for resolving exams & enrollments
+        const loadedCourses = d.courses || [];
+        const courseMap = new Map<string, Course>();
+        loadedCourses.forEach(c => {
+          if (c.code) courseMap.set(c.code.toUpperCase(), c);
+        });
+
         if (tablesNeeded.includes('INITIAL_ANNOUNCEMENTS')) {
-          setAnnouncements(d.announcements || []);
+          const rawAnn = d.announcements || [];
+          setAnnouncements(rawAnn.map(a => ({
+            ...a,
+            author_name: a.author_name || resolveAuthorName(a.author_id, 'Admin')
+          })));
         }
         if (tablesNeeded.includes('INITIAL_THREADS')) {
-          setThreads(d.threads || []);
+          const rawThreads = d.threads || [];
+          setThreads(rawThreads.map(t => ({
+            ...t,
+            author_name: t.author_name || resolveAuthorName(t.author_id, 'Student')
+          })));
         }
         if (tablesNeeded.includes('INITIAL_SCHEDULES')) {
           setSchedules(d.schedules || []);
@@ -308,7 +417,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setExceptionEvents(d.exceptionEvents || []);
         }
         if (tablesNeeded.includes('INITIAL_EXAMS')) {
-          setExams(d.exams || []);
+          const rawExams = d.exams || [];
+          setExams(rawExams.map(ex => {
+            const matchedCourse = courseMap.get(ex.course_code.toUpperCase());
+            return {
+              ...ex,
+              course_name: matchedCourse?.name || ex.course_name || ex.course_code,
+              target_branch: matchedCourse?.branch || ex.target_branch || 'All'
+            };
+          }));
         }
         if (tablesNeeded.includes('INITIAL_FOLDERS')) {
           setFolders(d.folders || []);
@@ -318,10 +435,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setResources((d.resources || []).map(r => ({ ...r, content: undefined })));
         }
         if (tablesNeeded.includes('INITIAL_COURSES')) {
-          setCourses(d.courses || []);
+          setCourses(loadedCourses);
         }
         if (tablesNeeded.includes('INITIAL_ENROLLMENTS')) {
-          setEnrollments(d.enrollments || []);
+          const rawEns = d.enrollments || [];
+          setEnrollments(rawEns.map(en => {
+            const matchedCourse = courseMap.get(en.course_code.toUpperCase());
+            return {
+              ...en,
+              semester: matchedCourse?.semester || en.semester || 'Autumn 2026'
+            };
+          }));
+        }
+        if (tablesNeeded.includes('HOSTEL_INFO')) {
+          if (d.hostels && d.hostels.length > 0) {
+            setHostels(d.hostels);
+          }
+        }
+        if (tablesNeeded.includes('BRANCH_INFO')) {
+          if (d.branches && d.branches.length > 0) {
+            setBranches(d.branches);
+          }
         }
 
         setAirtableStatus({
@@ -344,12 +478,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsAirtableLoading(false);
       setLoadingTabPath(null);
     }
-  }, []);
+  }, [resolveAuthorName]);
 
   // Refresh data currently loaded and needed for the active tab (called by navbar refresh button)
   const refreshCurrentData = useCallback(async (): Promise<boolean> => {
+    await refreshUserDirectory();
     return await loadDataForTab(currentPath);
-  }, [currentPath, loadDataForTab]);
+  }, [currentPath, loadDataForTab, refreshUserDirectory]);
 
   const refreshAirtable = useCallback(async () => {
     await refreshCurrentData();
@@ -379,6 +514,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.setItem('iris_user_session', JSON.stringify(res.user));
       } catch {}
       registerUserRole(res.user);
+      refreshUserDirectory();
       return { success: true };
     }
     return { success: false, error: res.error || 'Invalid credentials' };
@@ -411,6 +547,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.setItem('iris_user_session', JSON.stringify(res.user));
       } catch {}
       registerUserRole(res.user);
+      refreshUserDirectory();
       return { success: true, user: res.user };
     }
 
@@ -446,6 +583,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.setItem('iris_user_session', JSON.stringify(res.user));
       } catch {}
       registerUserRole(res.user);
+      refreshUserDirectory();
 
       // Keep authored items' display name synced in active views
       const fullName = res.user.name;
@@ -489,7 +627,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {}
   };
 
-  // Reply handlers
+  // Reply handlers (author_name resolved via user.id + MOCK_USERS)
   const addReply = (target_id: string, content: string) => {
     if (!user) return;
     const newReply: Reply = {
@@ -560,8 +698,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Thread handlers
   const addThread = (thread: Thread) => {
-    setThreads(prev => [thread, ...prev]);
-    airtableService.createThread(thread).catch(err => {
+    const threadWithAuthor: Thread = {
+      ...thread,
+      author_name: thread.author_name || (user ? user.name : 'Student')
+    };
+    setThreads(prev => [threadWithAuthor, ...prev]);
+    airtableService.createThread(threadWithAuthor).catch(err => {
       console.warn('[Airtable] Failed to create thread in Airtable:', err);
     });
   };
@@ -645,11 +787,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Exam handlers
+  // Exam handlers (course_name & target_branch derived dynamically from courses)
   const addExam = (examData: Omit<ExamItem, 'id'>) => {
+    const matchedCourse = courses.find(c => c.code.toUpperCase() === examData.course_code.toUpperCase());
     const newExam: ExamItem = {
       id: `exam_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      ...examData
+      ...examData,
+      course_name: matchedCourse?.name || examData.course_name || examData.course_code,
+      target_branch: matchedCourse?.branch || examData.target_branch || 'All'
     };
     setExams(prev => [...prev, newExam]);
     airtableService.createExam(newExam).catch(err => {
@@ -658,7 +803,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const editExam = (id: string, examData: Partial<ExamItem>) => {
-    setExams(prev => prev.map(ex => ex.id === id ? { ...ex, ...examData } : ex));
+    setExams(prev => prev.map(ex => {
+      if (ex.id !== id) return ex;
+      const updatedCode = examData.course_code || ex.course_code;
+      const matchedCourse = courses.find(c => c.code.toUpperCase() === updatedCode.toUpperCase());
+      return {
+        ...ex,
+        ...examData,
+        course_name: matchedCourse?.name || examData.course_name || ex.course_name,
+        target_branch: matchedCourse?.branch || examData.target_branch || ex.target_branch
+      };
+    }));
     airtableService.updateExam(id, examData).catch(err => {
       console.warn('[Airtable] Failed to update exam in Airtable:', err);
     });
@@ -742,7 +897,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           exams, setExams, addExam, editExam, deleteExam,
           folders, setFolders, resources, setResources,
           createFolder, deleteFolder, uploadResource, deleteResource,
-          courses, setCourses, enrollments, setEnrollments, hostels,
+          courses, setCourses, enrollments, setEnrollments, hostels, branches,
+          resolveAuthorName, resolveHRs,
           airtableStatus, refreshAirtable, refreshCurrentData, loadDataForTab, isAirtableLoading, loadingTabPath
         }}>
           <RouterContext.Provider value={{ path: currentPath, navigate: handleNavigate, scheduleSubView, setScheduleSubView }}>

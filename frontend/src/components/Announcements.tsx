@@ -276,7 +276,7 @@ export const Announcements = () => {
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         const contentMatch = a.content.toLowerCase().includes(q);
-        const authorMatch = a.author_name.toLowerCase().includes(q);
+        const authorMatch = (a.author_name || '').toLowerCase().includes(q);
         const targetMatch = a.target.toLowerCase().includes(q);
         const tagMatch = a.tags.some(t => t.toLowerCase().includes(q));
         if (!contentMatch && !authorMatch && !targetMatch && !tagMatch) {

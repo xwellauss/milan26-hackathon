@@ -11,17 +11,20 @@ import {
   Eye,
   EyeOff,
   Mail,
+  Phone,
   Shield,
-  Save
+  Save,
+  GraduationCap,
+  Users
 } from 'lucide-react';
 import { useAuth, useData } from '../context/AppContext';
 import { HostelName } from '../types';
-import { HOSTEL_TABLE } from '../utils/institute';
+import { HOSTEL_TABLE, BRANCH_TABLE } from '../utils/institute';
 import { Button, UserNameWithTag } from './UI';
 
 export const EditProfile = () => {
   const { user, updateProfile, updatePassword } = useAuth();
-  const { hostels } = useData();
+  const { hostels, branches, resolveHRs } = useData();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,7 +78,15 @@ export const EditProfile = () => {
 
   const availableHostels = hostels.length > 0 ? hostels : HOSTEL_TABLE;
   const activeHostelDetails =
-    availableHostels.find(h => h.name === selectedHostel) || availableHostels[0];
+    availableHostels.find(h => (h.hostel_name || h.name) === selectedHostel) || availableHostels[0];
+
+  const availableBranches = branches.length > 0 ? branches : BRANCH_TABLE;
+  const activeBranchDetails =
+    availableBranches.find(b => b.branch_code.toUpperCase() === user.branch.toUpperCase()) ||
+    availableBranches.find(b => user.branch.toUpperCase().startsWith(b.branch_code.toUpperCase())) ||
+    availableBranches[0];
+
+  const resolvedHrs = activeHostelDetails ? resolveHRs(activeHostelDetails.hr_ids) : [];
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -198,7 +209,7 @@ export const EditProfile = () => {
   const displayInitial = (firstName.trim() || user.name || 'S').charAt(0).toUpperCase();
 
   return (
-    <div className="space-y-6 select-none max-w-4xl mx-auto">
+    <div className="space-y-6 select-none max-w-4xl mx-auto animate-fade-in">
       {/* Header Banner */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-indigo-100/80 dark:border-slate-800 p-6 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -217,14 +228,14 @@ export const EditProfile = () => {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                Edit Profile
+                User Profile
               </h1>
               <span className="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700">
                 {user.rollNo}
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Manage your profile photo, display name, hostel assignment, and account password.
+              Manage your display name, residence details, academic batch, and credentials.
             </p>
           </div>
         </div>
@@ -411,11 +422,11 @@ export const EditProfile = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">
-                  Roll Number & Batch
+                  Roll Number & Branch Code
                 </label>
                 <input
                   type="text"
-                  value={`${user.rollNo} (${user.branch !== '-' ? user.branch : 'HR'} • ${user.admissionYear})`}
+                  value={`${user.rollNo} (${user.branch !== '-' ? user.branch : 'HR'})`}
                   disabled
                   className="w-full px-3.5 py-2.5 border border-slate-200/70 dark:border-slate-800 rounded-xl bg-slate-100/70 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 text-sm font-mono cursor-not-allowed"
                 />
@@ -435,11 +446,14 @@ export const EditProfile = () => {
                 }}
                 className="w-full px-3.5 py-2.5 border border-slate-200 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/80 outline-none bg-white dark:bg-slate-800/90 dark:text-slate-100 transition-all text-sm cursor-pointer"
               >
-                {availableHostels.map(h => (
-                  <option key={h.id} value={h.name}>
-                    {h.name}
-                  </option>
-                ))}
+                {availableHostels.map(h => {
+                  const hName = h.hostel_name || h.name || 'Hostel';
+                  return (
+                    <option key={h.id} value={hName}>
+                      {hName} ({h.hostel_code || h.code})
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -585,8 +599,9 @@ export const EditProfile = () => {
           </form>
         </div>
 
-        {/* Right Column: Assigned Hostel Information Card (from HOSTEL_TABLE) */}
+        {/* Right Column: Assigned Hostel Information & Branch Information Cards */}
         <div className="space-y-6">
+          {/* 1. Assigned Hostel Information Card */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-6 shadow-2xs space-y-4">
             <div className="flex items-center gap-2.5 pb-4 border-b border-slate-100 dark:border-slate-800">
               <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
@@ -602,66 +617,151 @@ export const EditProfile = () => {
               </div>
             </div>
 
-            <div key={activeHostelDetails.id} className="space-y-4 animate-tab-enter">
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60">
-                <div className="flex items-center justify-between">
-                  <span className="text-base font-bold text-slate-900 dark:text-slate-100">
-                    {activeHostelDetails.name}
+            {activeHostelDetails && (
+              <div key={activeHostelDetails.id} className="space-y-4 animate-tab-enter">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
+                  <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                    {activeHostelDetails.hostel_name || activeHostelDetails.name}
                   </span>
                   <span className="px-2 py-0.5 text-[11px] font-mono font-bold rounded-md bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60">
-                    {activeHostelDetails.code}
+                    {activeHostelDetails.hostel_code || activeHostelDetails.code}
                   </span>
                 </div>
-              </div>
 
-              <div className="space-y-3 text-xs">
-                <div className="py-2 border-b border-slate-100 dark:border-slate-800 space-y-1">
-                  <div className="text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
-                    <Shield className="w-3.5 h-3.5" />
-                    <span>Hostel Warden</span>
-                  </div>
-                  <div className="font-semibold text-slate-800 dark:text-slate-200">
-                    {activeHostelDetails.warden_name}
-                  </div>
-                  <div className="text-[11px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
-                    <Mail className="w-3 h-3" />
-                    <span>{activeHostelDetails.warden_email}</span>
-                  </div>
-                </div>
-
-                <div className="py-2 space-y-1">
-                  <div className="text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
-                    <UserIcon className="w-3.5 h-3.5" />
-                    <span>Hostel Representative (HR)</span>
-                  </div>
-                  {activeHostelDetails?.hr_name ? (
-                    <div className="space-y-1 pt-0.5">
-                      <div className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                        <UserNameWithTag name={activeHostelDetails.hr_name} />
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100/90 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/70 leading-none">
-                          {activeHostelDetails.name} HR
-                        </span>
+                <div className="space-y-3 text-xs">
+                  {/* Warden Details */}
+                  <div className="py-2 border-b border-slate-100 dark:border-slate-800 space-y-1">
+                    <div className="text-slate-400 dark:text-slate-500 flex items-center gap-1.5 font-medium text-[11px]">
+                      <Shield className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>Hostel Warden</span>
+                    </div>
+                    <div className="font-semibold text-slate-800 dark:text-slate-200 text-sm">
+                      {activeHostelDetails.warden_name}
+                    </div>
+                    {activeHostelDetails.warden_email && (
+                      <div className="text-[11px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                        <Mail className="w-3 h-3" />
+                        <a href={`mailto:${activeHostelDetails.warden_email}`} className="hover:underline">
+                          {activeHostelDetails.warden_email}
+                        </a>
                       </div>
-                      {activeHostelDetails.hr_rollNo && (
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-                          Roll No: {activeHostelDetails.hr_rollNo}
-                        </div>
-                      )}
-                      {activeHostelDetails.hr_email && (
-                        <div className="text-[11px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
-                          <Mail className="w-3 h-3" />
-                          <span>{activeHostelDetails.hr_email}</span>
-                        </div>
+                    )}
+                    {activeHostelDetails.warden_number && (
+                      <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 font-mono">
+                        <Phone className="w-3 h-3 text-slate-400" />
+                        <span>{activeHostelDetails.warden_number}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Hostel Representatives (HR) Details */}
+                  <div className="py-2 space-y-2">
+                    <div className="text-slate-400 dark:text-slate-500 flex items-center gap-1.5 font-medium text-[11px]">
+                      <Users className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Hostel Representatives (HR)</span>
+                      {resolvedHrs.length > 0 && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-mono">
+                          {resolvedHrs.length}
+                        </span>
                       )}
                     </div>
-                  ) : (
-                    <div className="text-slate-400 dark:text-slate-500 italic">
-                      Not assigned
-                    </div>
-                  )}
+
+                    {resolvedHrs.length > 0 ? (
+                      <div className="space-y-2.5 pt-0.5">
+                        {resolvedHrs.map((hr) => (
+                          <div
+                            key={hr.id}
+                            className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 space-y-1"
+                          >
+                            <div className="font-semibold text-slate-800 dark:text-slate-200 flex items-center justify-between gap-1.5">
+                              <span className="text-xs">{hr.name}</span>
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60">
+                                {activeHostelDetails.hostel_name || activeHostelDetails.name} HR
+                              </span>
+                            </div>
+                            {hr.rollNo && (
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                                Roll No: {hr.rollNo}
+                              </div>
+                            )}
+                            {hr.email && (
+                              <div className="text-[10px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                                <Mail className="w-2.5 h-2.5" />
+                                <a href={`mailto:${hr.email}`} className="hover:underline">
+                                  {hr.email}
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-slate-400 dark:text-slate-500 italic text-xs">
+                        No representative assigned
+                      </div>
+                    )}
+                  </div>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* 2. Branch & Faculty Advisor Information Card */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-6 shadow-2xs space-y-4">
+            <div className="flex items-center gap-2.5 pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                <GraduationCap className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  Branch Information
+                </h2>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                  Academic department & faculty contact
+                </p>
               </div>
             </div>
+
+            {activeBranchDetails && (
+              <div key={activeBranchDetails.id || activeBranchDetails.branch_code} className="space-y-4 animate-tab-enter">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
+                  <div className="min-w-0 pr-2">
+                    <div className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                      {activeBranchDetails.branch_name}
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 text-[11px] font-mono font-bold rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60 shrink-0">
+                    {activeBranchDetails.branch_code}
+                  </span>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div className="py-2 space-y-1">
+                    <div className="text-slate-400 dark:text-slate-500 flex items-center gap-1.5 font-medium text-[11px]">
+                      <Shield className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Faculty Advisor (FA)</span>
+                    </div>
+                    <div className="font-semibold text-slate-800 dark:text-slate-200 text-sm">
+                      {activeBranchDetails.fa_name}
+                    </div>
+                    {activeBranchDetails.fa_email && (
+                      <div className="text-[11px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                        <Mail className="w-3 h-3" />
+                        <a href={`mailto:${activeBranchDetails.fa_email}`} className="hover:underline">
+                          {activeBranchDetails.fa_email}
+                        </a>
+                      </div>
+                    )}
+                    {activeBranchDetails.fa_number && (
+                      <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 font-mono">
+                        <Phone className="w-3 h-3 text-slate-400" />
+                        <span>{activeBranchDetails.fa_number}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

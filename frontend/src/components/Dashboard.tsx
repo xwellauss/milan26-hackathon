@@ -624,14 +624,6 @@ export const Dashboard = () => {
                     {selectedExamDetails.venue || 'To be announced (TBA)'}
                   </span>
                 </div>
-                {selectedExamDetails.slot && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 dark:text-slate-400">Slot:</span>
-                    <span className="font-semibold text-slate-900 dark:text-slate-100">
-                      {selectedExamDetails.slot}
-                    </span>
-                  </div>
-                )}
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400">Target Branch:</span>
                   <span className="font-semibold text-slate-900 dark:text-slate-100">

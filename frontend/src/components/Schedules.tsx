@@ -169,7 +169,6 @@ export const Schedules = () => {
     hasVenue: boolean;
     venue: string;
     target_branch: Branch | 'All';
-    slot: string;
     notes: string;
   }>({
     date: '2026-10-05',
@@ -181,7 +180,6 @@ export const Schedules = () => {
     hasVenue: true,
     venue: 'Academic Block A - LH-101',
     target_branch: user?.role === 'CR' ? user.branch : 'CS',
-    slot: 'Slot A',
     notes: ''
   });
 
@@ -710,8 +708,7 @@ export const Schedules = () => {
         ex.course_code.toLowerCase().includes(q) ||
         (ex.course_name && ex.course_name.toLowerCase().includes(q)) ||
         ex.exam_name.toLowerCase().includes(q) ||
-        (ex.venue && ex.venue.toLowerCase().includes(q)) ||
-        (ex.slot && ex.slot.toLowerCase().includes(q))
+        (ex.venue && ex.venue.toLowerCase().includes(q))
       );
     }
 
@@ -734,8 +731,7 @@ export const Schedules = () => {
       exam_name: 'Mid-Semester Examination',
       hasVenue: true,
       venue: 'Academic Block A - LH-101',
-      target_branch: user?.role === 'CR' ? crSelectedBranch : 'CS',
-      slot: 'Slot A',
+      target_branch: (user?.role === 'CR' ? crSelectedBranch : (user?.branch || 'CS')) as Branch,
       notes: ''
     });
     setIsExamModalOpen(true);
@@ -753,8 +749,7 @@ export const Schedules = () => {
       exam_name: ex.exam_name,
       hasVenue: ex.venue !== null && ex.venue !== undefined,
       venue: ex.venue || 'Academic Block A - LH-101',
-      target_branch: ex.target_branch,
-      slot: ex.slot || 'Slot A',
+      target_branch: (ex.target_branch || 'All') as Branch | 'All',
       notes: ex.notes || ''
     });
     setIsExamModalOpen(true);
@@ -771,7 +766,6 @@ export const Schedules = () => {
       exam_name: examForm.exam_name,
       venue: examForm.hasVenue ? examForm.venue : null,
       target_branch: examForm.target_branch,
-      slot: examForm.slot || null,
       notes: examForm.notes || null
     };
 
@@ -1213,11 +1207,6 @@ export const Schedules = () => {
                     <span className="px-2 py-0.5 text-xs font-semibold rounded-md bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200/50 dark:border-purple-900/50">
                       {viewingExamDetails.exam_name}
                     </span>
-                    {viewingExamDetails.slot && (
-                      <span className="px-2 py-0.5 text-xs font-medium rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                        {viewingExamDetails.slot}
-                      </span>
-                    )}
                   </div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
                     {viewingExamDetails.course_name || viewingExamDetails.course_code}
@@ -1334,16 +1323,10 @@ export const Schedules = () => {
                     onChange={(e: any) => setExamForm({ ...examForm, course_code: e.target.value })}
                     autoFocus
                   />
-                  <Input
-                    label="Slot (Optional)"
-                    placeholder="e.g. Slot A"
-                    value={examForm.slot}
-                    onChange={(e: any) => setExamForm({ ...examForm, slot: e.target.value })}
-                  />
                 </div>
 
                 <Input
-                  label="Course Title"
+                  label="Course Title (Optional - auto-derived from courses)"
                   placeholder="e.g. Operating Systems"
                   value={examForm.course_name}
                   onChange={(e: any) => setExamForm({ ...examForm, course_name: e.target.value })}

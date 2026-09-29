@@ -28,7 +28,9 @@ const TABLE_NAMES = [
   'INITIAL_FOLDERS',
   'INITIAL_RESOURCES',
   'INITIAL_COURSES',
-  'INITIAL_ENROLLMENTS'
+  'INITIAL_ENROLLMENTS',
+  'HOSTEL_INFO',
+  'BRANCH_INFO'
 ];
 
 // --- Secure Password Hashing & Verification ---
@@ -78,7 +80,7 @@ function sanitizeUser(fields: Record<string, any>, recordId?: string) {
 // Institutional student identity resolution
 const IITH_BTECH_EMAIL_REGEX = /^(?<branchCode>[a-z]{2})(?<year>\d{2})btech(?<num>\d{5})@iith\.ac\.in$/i;
 
-const BRANCH_CODE_MAP: Record<string, string> = {
+const BRANCH_PREFIX_MAP: Record<string, string> = {
   cs: 'CS',
   ee: 'EE',
   mc: 'MnC',
@@ -90,14 +92,16 @@ const BRANCH_CODE_MAP: Record<string, string> = {
 };
 
 const CR_EMAILS: Record<string, string> = {
-  'cs26btech11001@iith.ac.in': 'CS',
-  'cs26btech11002@iith.ac.in': 'CS',
-  'ee26btech11002@iith.ac.in': 'EE',
-  'mc26btech11003@iith.ac.in': 'MnC',
-  'ai26btech11001@iith.ac.in': 'AI',
-  'me26btech11001@iith.ac.in': 'ME',
-  'ce26btech11001@iith.ac.in': 'CE',
-  'bt26btech11001@iith.ac.in': 'BT'
+  'cs26btech11001@iith.ac.in': 'CS26',
+  'cs26btech11002@iith.ac.in': 'CS26',
+  'ee26btech11002@iith.ac.in': 'EE26',
+  'mc26btech11003@iith.ac.in': 'MnC26',
+  'ai26btech11001@iith.ac.in': 'AI26',
+  'me26btech11001@iith.ac.in': 'ME26',
+  'ce26btech11001@iith.ac.in': 'CE26',
+  'bt26btech11001@iith.ac.in': 'BT26',
+  'cs25btech11001@iith.ac.in': 'CS25',
+  'ee25btech11001@iith.ac.in': 'EE25'
 };
 
 const HR_EMAILS: Record<string, string> = {
@@ -116,7 +120,7 @@ function inferUserFromEmail(email: string) {
   if (!match || !match.groups) {
     return {
       isValid: false,
-      branch: 'CS',
+      branch: 'CS26',
       admissionYear: 2026,
       rollNo: '',
       role: 'Normal Student',
@@ -124,11 +128,13 @@ function inferUserFromEmail(email: string) {
     };
   }
 
-  const branchCode = match.groups.branchCode.toLowerCase();
-  const yearDigits = parseInt(match.groups.year, 10);
+  const rawBranchCode = match.groups.branchCode.toLowerCase();
+  const yearDigitsStr = match.groups.year;
+  const yearDigits = parseInt(yearDigitsStr, 10);
   const admissionYear = 2000 + yearDigits;
   const rollNo = normalized.replace(/@iith\.ac\.in$/i, '');
-  const branch = BRANCH_CODE_MAP[branchCode] || branchCode.toUpperCase();
+  const prefix = BRANCH_PREFIX_MAP[rawBranchCode] || rawBranchCode.toUpperCase();
+  const branch = CR_EMAILS[normalized] || `${prefix}${yearDigitsStr}`;
 
   let role = 'Normal Student';
   if (CR_EMAILS[normalized]) {
@@ -474,10 +480,36 @@ app.get('/api/auth/public-user/:userId', async (req, res) => {
         id: String(f.id || recRes.data.id),
         name: String(f.name || 'Student'),
         role: String(f.role || 'Normal Student'),
-        branch: String(f.branch || 'CS'),
-        hostel: String(f.hostel || 'Vivekananda')
+        branch: String(f.branch || 'CS26'),
+        hostel: String(f.hostel || 'Vivekananda'),
+        email: String(f.email || ''),
+        rollNo: String(f.rollNo || '')
       }
     });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 7. Public User Directory for resolving author names & HR information safely (without passwords)
+app.get('/api/auth/users-directory', async (_req, res) => {
+  try {
+    const recordsRes = await fetchAllTableRecords('MOCK_USERS');
+    if (!recordsRes.success || !recordsRes.records) {
+      return res.json({ success: true, users: [] });
+    }
+
+    const users = recordsRes.records.map(r => ({
+      id: String(r.fields.id || r.id),
+      name: String(r.fields.name || 'Student'),
+      role: String(r.fields.role || 'Normal Student'),
+      branch: String(r.fields.branch || 'CS26'),
+      hostel: String(r.fields.hostel || 'Vivekananda'),
+      email: String(r.fields.email || ''),
+      rollNo: String(r.fields.rollNo || '')
+    }));
+
+    res.json({ success: true, users });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
