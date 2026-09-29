@@ -1,3 +1,4 @@
+import { scrypt } from 'scrypt-js';
 import {
   User, Announcement, Reply, Thread, ScheduleMaster,
   BaseEvent, ExceptionEvent, ExamItem, ResourceFolder, ResourceItem,
@@ -166,7 +167,59 @@ const parseTeachingAssistants = (val: any): string[] => {
   return [];
 };
 
-// Direct client-side Airtable REST API requester (for Netlify/static hosting)
+// --- Direct Client-Side Password Hashing & Verification ---
+async function hashPassword(password: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return 'sha256:' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  if (!storedHash) return false;
+  if (storedHash === password) return true;
+  if (storedHash.startsWith('sha256:')) {
+    const hashed = await hashPassword(password);
+    return storedHash === hashed;
+  }
+  if (storedHash.startsWith('scrypt:')) {
+    const parts = storedHash.split(':');
+    if (parts.length === 3) {
+      const salt = parts[1];
+      const key = parts[2];
+      try {
+        const pwBytes = new TextEncoder().encode(password.normalize('NFKC'));
+        const saltBytes = new TextEncoder().encode(salt);
+        const derived = await scrypt(pwBytes, saltBytes, 16384, 8, 1, 64);
+        const derivedHex = Array.from(derived).map(b => b.toString(16).padStart(2, '0')).join('');
+        return derivedHex.toLowerCase() === key.toLowerCase();
+      } catch {
+        return false;
+      }
+    }
+  }
+  return storedHash === password;
+}
+
+// Ensure password is never exposed in client application memory
+function sanitizeUser(fields: Record<string, any>, recordId?: string): User {
+  const { password, ...safeFields } = fields;
+  return {
+    id: String(safeFields.id || recordId || ''),
+    name: String(safeFields.name || 'Student'),
+    firstName: String(safeFields.firstName || (safeFields.name ? String(safeFields.name).split(' ')[0] : '')),
+    lastName: String(safeFields.lastName || (safeFields.name ? String(safeFields.name).split(' ').slice(1).join(' ') : '')),
+    email: String(safeFields.email || '').trim().toLowerCase(),
+    rollNo: String(safeFields.rollNo || ''),
+    admissionYear: Number(safeFields.admissionYear || 2026),
+    role: (safeFields.role as any) || 'Normal Student',
+    branch: (safeFields.branch as any) || 'CS26',
+    hostel: (safeFields.hostel as any) || 'Vivekananda',
+    avatarUrl: safeFields.avatarUrl || undefined
+  };
+}
+
+// Direct client-side Airtable REST API requester (no server proxy)
 async function directAirtableApiRequest(
   endpoint: string,
   method: string = 'GET',
@@ -245,8 +298,6 @@ async function directFindRecordIdByEntityId(tableName: string, entityId: string)
 }
 
 export class AirtableService {
-  private useDirectApi: boolean = false;
-
   private parseRawTables(tables: Record<string, any>): any {
     const parsedData: any = {};
 
@@ -269,7 +320,7 @@ export class AirtableService {
       });
     }
 
-    // 3. INITIAL_THREADS
+    // 2. INITIAL_THREADS
     if (tables.INITIAL_THREADS?.success && tables.INITIAL_THREADS.records?.length > 0) {
       parsedData.threads = tables.INITIAL_THREADS.records.map((r: any) => {
         const f = r.fields || {};
@@ -289,7 +340,7 @@ export class AirtableService {
       });
     }
 
-    // 4. INITIAL_REPLIES
+    // 3. INITIAL_REPLIES
     if (tables.INITIAL_REPLIES?.success && tables.INITIAL_REPLIES.records?.length > 0) {
       parsedData.replies = tables.INITIAL_REPLIES.records.map((r: any) => {
         const f = r.fields || {};
@@ -307,7 +358,7 @@ export class AirtableService {
       }).sort((a: Reply, b: Reply) => a.created_at - b.created_at);
     }
 
-    // 5. INITIAL_SCHEDULES
+    // 4. INITIAL_SCHEDULES
     if (tables.INITIAL_SCHEDULES?.success && tables.INITIAL_SCHEDULES.records?.length > 0) {
       parsedData.schedules = tables.INITIAL_SCHEDULES.records.map((r: any) => {
         const f = r.fields || {};
@@ -324,7 +375,7 @@ export class AirtableService {
       });
     }
 
-    // 6. INITIAL_BASE_EVENTS
+    // 5. INITIAL_BASE_EVENTS
     if (tables.INITIAL_BASE_EVENTS?.success && tables.INITIAL_BASE_EVENTS.records?.length > 0) {
       parsedData.baseEvents = tables.INITIAL_BASE_EVENTS.records.map((r: any) => {
         const f = r.fields || {};
@@ -342,7 +393,7 @@ export class AirtableService {
       });
     }
 
-    // 7. INITIAL_EXCEPTIONS
+    // 6. INITIAL_EXCEPTIONS
     if (tables.INITIAL_EXCEPTIONS?.success && tables.INITIAL_EXCEPTIONS.records?.length > 0) {
       parsedData.exceptionEvents = tables.INITIAL_EXCEPTIONS.records.map((r: any) => {
         const f = r.fields || {};
@@ -363,7 +414,7 @@ export class AirtableService {
       });
     }
 
-    // 8. INITIAL_EXAMS
+    // 7. INITIAL_EXAMS
     if (tables.INITIAL_EXAMS?.success && tables.INITIAL_EXAMS.records?.length > 0) {
       parsedData.exams = tables.INITIAL_EXAMS.records.map((r: any) => {
         const f = r.fields || {};
@@ -383,7 +434,7 @@ export class AirtableService {
       });
     }
 
-    // 9. INITIAL_FOLDERS
+    // 8. INITIAL_FOLDERS
     if (tables.INITIAL_FOLDERS?.success && tables.INITIAL_FOLDERS.records?.length > 0) {
       parsedData.folders = tables.INITIAL_FOLDERS.records.map((r: any) => {
         const f = r.fields || {};
@@ -400,7 +451,7 @@ export class AirtableService {
       });
     }
 
-    // 10. INITIAL_RESOURCES (Metadata only - content loaded on-demand to save memory)
+    // 9. INITIAL_RESOURCES (Metadata only - content loaded on-demand to save memory)
     if (tables.INITIAL_RESOURCES?.success && tables.INITIAL_RESOURCES.records?.length > 0) {
       parsedData.resources = tables.INITIAL_RESOURCES.records.map((r: any) => {
         const f = r.fields || {};
@@ -426,7 +477,7 @@ export class AirtableService {
       });
     }
 
-    // 11. INITIAL_COURSES (code is primary key)
+    // 10. INITIAL_COURSES
     if (tables.INITIAL_COURSES?.success && tables.INITIAL_COURSES.records?.length > 0) {
       parsedData.courses = tables.INITIAL_COURSES.records.map((r: any) => {
         const f = r.fields || {};
@@ -453,7 +504,7 @@ export class AirtableService {
       });
     }
 
-    // 12. INITIAL_ENROLLMENTS (uses course_code, semester retrieved from INITIAL_COURSES)
+    // 11. INITIAL_ENROLLMENTS
     if (tables.INITIAL_ENROLLMENTS?.success && tables.INITIAL_ENROLLMENTS.records?.length > 0) {
       parsedData.enrollments = tables.INITIAL_ENROLLMENTS.records.map((r: any) => {
         const f = r.fields || {};
@@ -471,7 +522,7 @@ export class AirtableService {
       });
     }
 
-    // 13. HOSTEL_INFO
+    // 12. HOSTEL_INFO
     if (tables.HOSTEL_INFO?.success && tables.HOSTEL_INFO.records?.length > 0) {
       parsedData.hostels = tables.HOSTEL_INFO.records.map((r: any) => {
         const f = r.fields || {};
@@ -493,7 +544,7 @@ export class AirtableService {
       });
     }
 
-    // 14. BRANCH_INFO
+    // 13. BRANCH_INFO
     if (tables.BRANCH_INFO?.success && tables.BRANCH_INFO.records?.length > 0) {
       parsedData.branches = tables.BRANCH_INFO.records.map((r: any) => {
         const f = r.fields || {};
@@ -513,34 +564,9 @@ export class AirtableService {
     return parsedData;
   }
 
+  // Check direct Airtable connectivity
   async checkStatus(): Promise<AirtableStatus> {
     const currentBaseId = getBaseId();
-
-    if (!this.useDirectApi) {
-      try {
-        const res = await fetch('/api/airtable/status');
-        const contentType = res.headers.get('content-type') || '';
-        
-        if (res.ok && contentType.includes('application/json')) {
-          const data = await res.json();
-          if (data && typeof data.connected === 'boolean') {
-            return {
-              connected: data.connected ?? false,
-              baseId: data.baseId || currentBaseId,
-              status: data.status || (data.connected ? 'connected' : 'error'),
-              statusCode: data.statusCode,
-              message: data.message,
-              lastSyncedAt: Date.now()
-            };
-          }
-        }
-      } catch (err) {
-        console.warn('[Airtable] Proxy unavailable, switching to direct client Airtable API mode.');
-      }
-      this.useDirectApi = true;
-    }
-
-    // Direct mode fallback (Netlify / Static client host)
     const result = await directAirtableApiRequest('/INITIAL_ANNOUNCEMENTS?maxRecords=1', 'GET');
     if (result.status === 200) {
       return {
@@ -563,7 +589,7 @@ export class AirtableService {
     };
   }
 
-  // Load all tables from Airtable
+  // Load all tables directly from Airtable
   async fetchAllData(): Promise<{
     success: boolean;
     error?: any;
@@ -587,7 +613,7 @@ export class AirtableService {
     return this.fetchTables(TABLE_NAMES);
   }
 
-  // Load only requested tables from Airtable on-demand
+  // Load requested tables directly from Airtable
   async fetchTables(tableNames: string[]): Promise<{
     success: boolean;
     error?: any;
@@ -612,26 +638,6 @@ export class AirtableService {
       return { success: true, data: {} };
     }
 
-    if (!this.useDirectApi) {
-      try {
-        const res = await fetch(`/api/airtable/tables?names=${encodeURIComponent(tableNames.join(','))}`);
-        const contentType = res.headers.get('content-type') || '';
-        if (res.ok && contentType.includes('application/json')) {
-          const result = await res.json();
-          if (result.success && result.tables) {
-            return {
-              success: true,
-              data: this.parseRawTables(result.tables)
-            };
-          }
-        }
-      } catch (err) {
-        console.warn('[Airtable] Proxy fetchTables failed, switching to direct client API...');
-      }
-      this.useDirectApi = true;
-    }
-
-    // Direct client fetch logic (Netlify / SPA host)
     try {
       const results: Record<string, { success: boolean; records?: any[]; error?: any }> = {};
       let hasAnySuccess = false;
@@ -669,31 +675,8 @@ export class AirtableService {
     }
   }
 
-  // Generic write helpers
+  // Generic direct write helpers
   private async createRecord(table: string, fields: Record<string, any>): Promise<any> {
-    if (!this.useDirectApi) {
-      try {
-        const res = await fetch(`/api/airtable/${encodeURIComponent(table)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fields })
-        });
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const data = await res.json();
-          if (res.ok) {
-            if (data.record?.id && fields.id) {
-              recordIdMap.set(fields.id, data.record.id);
-            }
-          }
-          return data;
-        }
-      } catch (err) {
-        console.warn(`[Airtable] Server write network error for ${table}, using direct client API.`);
-        this.useDirectApi = true;
-      }
-    }
-
     const res = await directAirtableApiRequest(`/${encodeURIComponent(table)}`, 'POST', { fields, typecast: true });
     if (res.data?.id && fields.id) {
       recordIdMap.set(fields.id, res.data.id);
@@ -702,24 +685,6 @@ export class AirtableService {
   }
 
   private async updateRecord(table: string, id: string, fields: Record<string, any>): Promise<any> {
-    if (!this.useDirectApi) {
-      try {
-        const targetId = recordIdMap.get(id) || id;
-        const res = await fetch(`/api/airtable/${encodeURIComponent(table)}/${encodeURIComponent(targetId)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fields })
-        });
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          return await res.json();
-        }
-      } catch (err) {
-        console.warn(`[Airtable] Server update network error for ${table}, using direct client API.`);
-        this.useDirectApi = true;
-      }
-    }
-
     const targetAirtableId = await directFindRecordIdByEntityId(table, id);
     if (!targetAirtableId) return null;
     const res = await directAirtableApiRequest(`/${encodeURIComponent(table)}/${targetAirtableId}`, 'PATCH', { fields, typecast: true });
@@ -727,23 +692,6 @@ export class AirtableService {
   }
 
   private async deleteRecord(table: string, id: string): Promise<any> {
-    if (!this.useDirectApi) {
-      try {
-        const targetId = recordIdMap.get(id) || id;
-        const res = await fetch(`/api/airtable/${encodeURIComponent(table)}/${encodeURIComponent(targetId)}`, {
-          method: 'DELETE'
-        });
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          recordIdMap.delete(id);
-          return await res.json();
-        }
-      } catch (err) {
-        console.warn(`[Airtable] Server delete network error for ${table}, using direct client API.`);
-        this.useDirectApi = true;
-      }
-    }
-
     const targetAirtableId = await directFindRecordIdByEntityId(table, id);
     if (!targetAirtableId) return null;
     const res = await directAirtableApiRequest(`/${encodeURIComponent(table)}/${targetAirtableId}`, 'DELETE');
@@ -751,24 +699,44 @@ export class AirtableService {
     return res.data;
   }
 
-  // --- Specific Table Handlers ---
-
-  // --- Secure Authentication & Credential Handlers (Talk to server /api/auth/*) ---
+  // --- Direct Authentication & User Management (Using MOCK_USERS in Airtable directly) ---
 
   async login(email: string, password?: string): Promise<{ success: boolean; user?: User; error?: string }> {
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        return { success: false, error: data.error || 'Login failed' };
+      if (!email || typeof email !== 'string') {
+        return { success: false, error: 'Email is required' };
       }
-      return { success: true, user: data.user };
+      const cleanEmail = email.trim().toLowerCase();
+      const filter = encodeURIComponent(`{email}='${cleanEmail.replace(/'/g, "\\'")}'`);
+      const searchRes = await directAirtableApiRequest(`/MOCK_USERS?filterByFormula=${filter}&maxRecords=1`, 'GET');
+
+      if (searchRes.status >= 400 || !searchRes.data?.records || searchRes.data.records.length === 0) {
+        return {
+          success: false,
+          error: 'No account found with this email. Please sign up first.'
+        };
+      }
+
+      const record = searchRes.data.records[0];
+      const storedPassword = String(record.fields?.password || '');
+
+      if (password !== undefined) {
+        const isValid = await verifyPassword(password, storedPassword);
+        if (!isValid) {
+          return {
+            success: false,
+            error: 'Incorrect password. Please try again.'
+          };
+        }
+      }
+
+      const safeUser = sanitizeUser(record.fields, record.id);
+      return {
+        success: true,
+        user: safeUser
+      };
     } catch (err: any) {
-      return { success: false, error: err.message || 'Network error connecting to auth server' };
+      return { success: false, error: err.message || 'Login failed' };
     }
   }
 
@@ -780,18 +748,64 @@ export class AirtableService {
     hostel: string;
   }): Promise<{ success: boolean; user?: User; error?: string }> {
     try {
-      const res = await fetch('/api/auth/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params)
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        return { success: false, error: data.error || 'Sign up failed' };
+      const { firstName, lastName, email, password, hostel } = params;
+
+      if (!email || !password || !firstName) {
+        return { success: false, error: 'First name, email, and password are required' };
       }
-      return { success: true, user: data.user };
+
+      const cleanEmail = email.trim().toLowerCase();
+      const inferred = inferUserDetailsFromEmail(cleanEmail);
+      if (!inferred.isValid) {
+        return { success: false, error: inferred.error };
+      }
+
+      // Check for duplicate account
+      const filter = encodeURIComponent(`{email}='${cleanEmail.replace(/'/g, "\\'")}'`);
+      const checkRes = await directAirtableApiRequest(`/MOCK_USERS?filterByFormula=${filter}&maxRecords=1`, 'GET');
+      if (checkRes.status === 200 && checkRes.data?.records?.length > 0) {
+        return {
+          success: false,
+          error: 'An account with this email already exists. Please log in instead.'
+        };
+      }
+
+      const cleanFirst = String(firstName).trim();
+      const cleanLast = String(lastName || '').trim();
+      const fullName = `${cleanFirst} ${cleanLast}`.trim();
+      const hashedPassword = await hashPassword(password);
+      const newId = `u_${Date.now()}`;
+
+      const newFields = {
+        id: newId,
+        name: fullName,
+        firstName: cleanFirst,
+        lastName: cleanLast,
+        email: cleanEmail,
+        password: hashedPassword,
+        rollNo: inferred.rollNo,
+        admissionYear: inferred.admissionYear,
+        role: inferred.role,
+        branch: inferred.branch,
+        hostel: hostel || 'Vivekananda'
+      };
+
+      const createRes = await directAirtableApiRequest('/MOCK_USERS', 'POST', {
+        fields: newFields,
+        typecast: true
+      });
+
+      if (createRes.status >= 400) {
+        return { success: false, error: createRes.data?.error?.message || 'Failed to create user in Airtable' };
+      }
+
+      const safeUser = sanitizeUser(newFields, createRes.data?.id);
+      return {
+        success: true,
+        user: safeUser
+      };
     } catch (err: any) {
-      return { success: false, error: err.message || 'Network error connecting to auth server' };
+      return { success: false, error: err.message || 'Signup failed' };
     }
   }
 
@@ -803,18 +817,43 @@ export class AirtableService {
     avatarUrl?: string;
   }): Promise<{ success: boolean; user?: User; error?: string }> {
     try {
-      const res = await fetch('/api/auth/update-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params)
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        return { success: false, error: data.error || 'Failed to update profile' };
+      const { userId, firstName, lastName, hostel, avatarUrl } = params;
+      if (!userId) {
+        return { success: false, error: 'User ID is required' };
       }
-      return { success: true, user: data.user };
+
+      const targetRecId = await directFindRecordIdByEntityId('MOCK_USERS', userId);
+      if (!targetRecId) {
+        return { success: false, error: 'User record not found' };
+      }
+
+      const cleanFirst = String(firstName || '').trim();
+      const cleanLast = String(lastName || '').trim();
+      const fullName = `${cleanFirst} ${cleanLast}`.trim();
+
+      const patchFields: Record<string, any> = {
+        name: fullName,
+        firstName: cleanFirst,
+        lastName: cleanLast,
+        hostel: hostel || 'Vivekananda'
+      };
+      if (avatarUrl !== undefined) {
+        patchFields.avatarUrl = avatarUrl;
+      }
+
+      const updateRes = await directAirtableApiRequest(`/MOCK_USERS/${targetRecId}`, 'PATCH', {
+        fields: patchFields,
+        typecast: true
+      });
+
+      if (updateRes.status >= 400) {
+        return { success: false, error: updateRes.data?.error?.message || 'Failed to update profile' };
+      }
+
+      const safeUser = sanitizeUser(updateRes.data.fields, targetRecId);
+      return { success: true, user: safeUser };
     } catch (err: any) {
-      return { success: false, error: err.message || 'Network error updating profile' };
+      return { success: false, error: err.message || 'Failed to update profile' };
     }
   }
 
@@ -824,29 +863,59 @@ export class AirtableService {
     newPassword: string;
   }): Promise<{ success: boolean; error?: string }> {
     try {
-      const res = await fetch('/api/auth/update-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params)
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        return { success: false, error: data.error || 'Failed to update password' };
+      const { userId, previousPassword, newPassword } = params;
+      if (!userId || !previousPassword || !newPassword) {
+        return { success: false, error: 'User ID, previous password, and new password are required' };
       }
+
+      const targetRecId = await directFindRecordIdByEntityId('MOCK_USERS', userId);
+      if (!targetRecId) {
+        return { success: false, error: 'User record not found' };
+      }
+
+      const getRes = await directAirtableApiRequest(`/MOCK_USERS/${targetRecId}`, 'GET');
+      if (getRes.status >= 400 || !getRes.data?.fields) {
+        return { success: false, error: 'Could not fetch user record from Airtable' };
+      }
+
+      const storedPassword = String(getRes.data.fields?.password || '');
+      const isMatch = await verifyPassword(previousPassword, storedPassword);
+      if (!isMatch) {
+        return { success: false, error: 'Previous password is incorrect.' };
+      }
+
+      const newHashed = await hashPassword(newPassword);
+      const patchRes = await directAirtableApiRequest(`/MOCK_USERS/${targetRecId}`, 'PATCH', {
+        fields: { password: newHashed },
+        typecast: true
+      });
+
+      if (patchRes.status >= 400) {
+        return { success: false, error: patchRes.data?.error?.message || 'Failed to update password' };
+      }
+
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message || 'Network error updating password' };
+      return { success: false, error: err.message || 'Failed to update password' };
     }
   }
 
   async fetchReps(): Promise<Array<{ id: string; name: string; role: Role; branch: Branch; hostel: string }>> {
     try {
-      const res = await fetch('/api/auth/reps');
-      const data = await res.json();
-      if (res.ok && data.success && Array.isArray(data.reps)) {
-        return data.reps;
+      const recordsRes = await directFetchAllTableRecords('MOCK_USERS');
+      if (!recordsRes.success || !recordsRes.records) {
+        return [];
       }
-      return [];
+
+      return recordsRes.records
+        .filter(r => r.fields.role === 'CR' || r.fields.role === 'HR')
+        .map(r => ({
+          id: String(r.fields.id || r.id),
+          name: String(r.fields.name || 'Representative'),
+          role: (r.fields.role as Role) || 'CR',
+          branch: (r.fields.branch as Branch) || 'CS26',
+          hostel: String(r.fields.hostel || 'Vivekananda')
+        }));
     } catch {
       return [];
     }
@@ -854,12 +923,20 @@ export class AirtableService {
 
   async fetchPublicUser(userId: string): Promise<{ id: string; name: string; role: Role; branch: Branch; hostel: string } | null> {
     try {
-      const res = await fetch(`/api/auth/public-user/${encodeURIComponent(userId)}`);
-      const data = await res.json();
-      if (res.ok && data.success && data.user) {
-        return data.user;
-      }
-      return null;
+      const targetRecId = await directFindRecordIdByEntityId('MOCK_USERS', userId);
+      if (!targetRecId) return null;
+
+      const recRes = await directAirtableApiRequest(`/MOCK_USERS/${targetRecId}`, 'GET');
+      if (recRes.status >= 400 || !recRes.data?.fields) return null;
+
+      const f = recRes.data.fields;
+      return {
+        id: String(f.id || recRes.data.id),
+        name: String(f.name || 'Student'),
+        role: (f.role as Role) || 'Normal Student',
+        branch: (f.branch as Branch) || 'CS26',
+        hostel: String(f.hostel || 'Vivekananda')
+      };
     } catch {
       return null;
     }
@@ -867,18 +944,28 @@ export class AirtableService {
 
   async fetchUsersDirectory(): Promise<Array<{ id: string; name: string; role: Role; branch: Branch; hostel: string; rollNo?: string; email?: string }>> {
     try {
-      const res = await fetch('/api/auth/users-directory');
-      const data = await res.json();
-      if (res.ok && data.success && Array.isArray(data.users)) {
-        return data.users;
+      const recordsRes = await directFetchAllTableRecords('MOCK_USERS');
+      if (!recordsRes.success || !recordsRes.records) {
+        return [];
       }
-      return [];
+
+      return recordsRes.records.map(r => ({
+        id: String(r.fields.id || r.id),
+        name: String(r.fields.name || 'Student'),
+        role: (r.fields.role as Role) || 'Normal Student',
+        branch: (r.fields.branch as Branch) || 'CS26',
+        hostel: String(r.fields.hostel || 'Vivekananda'),
+        email: String(r.fields.email || ''),
+        rollNo: String(r.fields.rollNo || '')
+      }));
     } catch {
       return [];
     }
   }
 
-  // Announcements (author_name is resolved via author_id + MOCK_USERS, not written to Airtable)
+  // --- Entity Handlers ---
+
+  // Announcements
   async createAnnouncement(ann: Announcement): Promise<void> {
     const fields = {
       id: ann.id,
@@ -904,7 +991,7 @@ export class AirtableService {
     await this.deleteRecord('INITIAL_ANNOUNCEMENTS', id);
   }
 
-  // Threads (author_name is resolved via author_id + MOCK_USERS, not written to Airtable)
+  // Threads
   async createThread(t: Thread): Promise<void> {
     const fields = {
       id: t.id,
@@ -921,7 +1008,7 @@ export class AirtableService {
     await this.deleteRecord('INITIAL_THREADS', id);
   }
 
-  // Replies (author_name is resolved via author_id + MOCK_USERS, not written to Airtable)
+  // Replies
   async createReply(r: Reply): Promise<void> {
     const fields = {
       id: r.id,
@@ -1005,7 +1092,7 @@ export class AirtableService {
     await this.deleteRecord('INITIAL_EXCEPTIONS', id);
   }
 
-  // Exams (course_name & target_branch fetched from INITIAL_COURSES; slot dropped)
+  // Exams
   async createExam(exam: ExamItem): Promise<void> {
     const fields = {
       id: exam.id,
@@ -1065,12 +1152,10 @@ export class AirtableService {
       description: r.description || ''
     };
 
-    // 1. Create the resource record in INITIAL_RESOURCES
     const createRes = await this.createRecord('INITIAL_RESOURCES', fields);
 
-    // 2. If content is provided, upload it as an attachment to the "content" column
     if (r.content) {
-      const targetRecordId = createRes?.record?.id || recordIdMap.get(r.id) || r.id;
+      const targetRecordId = createRes?.id || recordIdMap.get(r.id) || r.id;
       let contentType = 'text/plain';
       const lowerName = r.name.toLowerCase();
       if (lowerName.endsWith('.md')) contentType = 'text/markdown';
@@ -1102,36 +1187,6 @@ export class AirtableService {
     filename: string,
     contentType: string = 'text/plain'
   ): Promise<any> {
-    // 1. Try server proxy first
-    if (!this.useDirectApi) {
-      try {
-        const res = await fetch('/api/airtable/upload_attachment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            table,
-            recordId,
-            fieldName,
-            file: fileData,
-            filename,
-            contentType
-          })
-        });
-        const contentTypeHeader = res.headers.get('content-type') || '';
-        if (contentTypeHeader.includes('application/json')) {
-          const data = await res.json();
-          if (res.ok && data.success) {
-            return data;
-          }
-          console.warn('[Airtable] Server upload_attachment returned:', data);
-        }
-      } catch (err) {
-        console.warn('[Airtable] Server upload_attachment network error, falling back to direct API:', err);
-        this.useDirectApi = true;
-      }
-    }
-
-    // 2. Direct Airtable content API fallback
     let airtableRecordId = recordId;
     if (!airtableRecordId.startsWith('rec')) {
       const resolved = await directFindRecordIdByEntityId(table, airtableRecordId);
@@ -1187,7 +1242,7 @@ export class AirtableService {
     await this.deleteRecord('INITIAL_RESOURCES', id);
   }
 
-  // Enrollments (course_code used, semester retrieved from INITIAL_COURSES)
+  // Enrollments
   async createEnrollment(en: Enrollment): Promise<void> {
     const fields = {
       id: en.id,
@@ -1203,34 +1258,15 @@ export class AirtableService {
     await this.deleteRecord('INITIAL_ENROLLMENTS', id);
   }
 
-  // Targeted fetch for replies (used by 1-second auto-refresh when viewing threads or announcements)
+  // Targeted fetch for replies
   async fetchRepliesForTarget(targetId: string): Promise<Reply[]> {
     if (!targetId) return [];
 
     let rawRecords: any[] = [];
-
-    if (!this.useDirectApi) {
-      try {
-        const res = await fetch(`/api/airtable/replies_by_target/${encodeURIComponent(targetId)}`);
-        const contentType = res.headers.get('content-type') || '';
-        if (res.ok && contentType.includes('application/json')) {
-          const result = await res.json();
-          if (result.success && Array.isArray(result.records)) {
-            rawRecords = result.records;
-          }
-        }
-      } catch (err) {
-        console.warn('[Airtable] Proxy replies fetch failed, falling back to direct API.');
-        this.useDirectApi = true;
-      }
-    }
-
-    if (this.useDirectApi) {
-      const filter = encodeURIComponent(`{target_id}='${targetId.replace(/'/g, "\\'")}'`);
-      const res = await directAirtableApiRequest(`/INITIAL_REPLIES?filterByFormula=${filter}`, 'GET');
-      if (res.status === 200 && Array.isArray(res.data?.records)) {
-        rawRecords = res.data.records;
-      }
+    const filter = encodeURIComponent(`{target_id}='${targetId.replace(/'/g, "\\'")}'`);
+    const res = await directAirtableApiRequest(`/INITIAL_REPLIES?filterByFormula=${filter}`, 'GET');
+    if (res.status === 200 && Array.isArray(res.data?.records)) {
+      rawRecords = res.data.records;
     }
 
     return rawRecords.map((r: any) => {
@@ -1249,31 +1285,10 @@ export class AirtableService {
     }).sort((a, b) => a.created_at - b.created_at);
   }
 
-  // Targeted fetch for resource file content (loaded strictly on-demand when viewing or downloading)
+  // Targeted fetch for resource file content (loaded strictly on-demand)
   async fetchResourceContent(resourceId: string): Promise<string> {
     if (!resourceId) return '';
 
-    // 1. Try server proxy endpoint
-    if (!this.useDirectApi) {
-      try {
-        const res = await fetch(`/api/airtable/resource_content/${encodeURIComponent(resourceId)}`);
-        const contentType = res.headers.get('content-type') || '';
-        if (res.ok && contentType.includes('application/json')) {
-          const result = await res.json();
-          if (result.success && typeof result.content === 'string') {
-            const clean = result.content;
-            if (clean !== '[object Object]' && clean !== '[object Objects]' && !clean.startsWith('[object')) {
-              return clean;
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[Airtable] Proxy resource content fetch failed, falling back to direct API.');
-        this.useDirectApi = true;
-      }
-    }
-
-    // 2. Direct Airtable client fallback
     let targetAirtableId: string | null | undefined = recordIdMap.get(resourceId);
     if (!targetAirtableId) {
       targetAirtableId = await directFindRecordIdByEntityId('INITIAL_RESOURCES', resourceId);
@@ -1316,7 +1331,7 @@ export class AirtableService {
                 const blob = await fileRes.blob();
                 return new Promise<string>((resolve) => {
                   const reader = new FileReader();
-                  reader.onloadend = () => resolve(reader.result as string || fileUrl);
+                  reader.onloadend = () => resolve((reader.result as string) || fileUrl);
                   reader.readAsDataURL(blob);
                 });
               }
