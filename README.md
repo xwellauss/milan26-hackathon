@@ -46,3 +46,14 @@ npm run dev
 # Build for production
 npm run build
 ```
+
+## Demo credentials to log in 
+   ### As a CR: 
+       email: cs26btech11059@iith.ac.in
+       password: 789
+   ### As a HR:
+       email: cs26btech11064@iith.ac.in
+       password: abc
+   ### As a Normal Student:
+       email: cs26btech11068@iith.ac.in
+       password: abc
